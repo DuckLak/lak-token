@@ -20,12 +20,14 @@
 
 ## 🌟 Features
 
-- ⛏️ **On-chain PoW Mining**: Mine tokens by finding valid nonces
-- 🎯 **Auto-adjusting Difficulty**: Dynamic difficulty based on mining activity
-- 🔒 **Fixed Supply**: Maximum 10,000,000 LAK tokens
-- 💎 **Fair Distribution**: 1 LAK reward per successful mine
-- 🛡️ **Security Audited**: Built with OpenZeppelin contracts
-- 📊 **Transparent Stats**: On-chain mining statistics
+- ⛏️ **On-chain PoW Mining**: Mine tokens directly on the blockchain by finding valid nonces.
+- 🎯 **Dual Difficulty Adjustment**:
+    - **Interval-based**: Difficulty adjusts based on the network's overall mining rate.
+    - **Time-based**: A "Time Bonus" makes it easier to mine the longer it has been since the last successful mine.
+- 🔒 **Fixed Supply**: A hard cap of 10,000,000 LAK tokens can ever be created.
+- 💎 **Fair Distribution**: A constant reward of 1 LAK per successful mine.
+- 🛡️ **Secure Foundation**: Built using battle-tested OpenZeppelin contracts.
+- 📊 **Transparent Stats**: All mining statistics are available on-chain for anyone to view.
 
 ## 📋 Contract Details
 
@@ -36,8 +38,9 @@
 | Decimals | 18 |
 | Max Supply | 10,000,000 LAK |
 | Reward per Mine | 1 LAK |
-| Difficulty Adjustment | Every 100 blocks |
-| Max Difficulty Change | ±20% per adjustment |
+| Interval Difficulty Adjustment | Every 100 blocks |
+| Target Mines per Interval | 50 |
+| Time Bonus | 10% easier every 30 seconds (up to 100%) |
 
 ## 🚀 Quick Start
 
@@ -79,21 +82,27 @@ npm install
 #### Manual Mining (Advanced)
 
 ```javascript
-// Find a valid nonce off-chain
+// This example demonstrates the core logic.
+// A timestamp is now required to prevent race conditions.
+
 const lastHash = await contract.lastHash();
-const difficulty = await contract.difficulty();
+// Get the current timestamp which will be used as a fixed reference
+const timestamp = (await provider.getBlock('latest')).timestamp; 
+// Get the difficulty calculated for this specific timestamp
+const difficulty = await contract.getEffectiveDifficulty(timestamp);
 
 for(let nonce = 0; nonce < 1000000; nonce++) {
-  const hash = ethers.utils.keccak256(
-    ethers.utils.defaultAbiCoder.encode(
+  // Use abi.encodePacked equivalent in ethers.js
+  const hash = ethers.keccak256(
+    ethers.solidityPacked(
       ['bytes32', 'address', 'uint256', 'uint256'],
-      [lastHash, myAddress, nonce, Math.floor(Date.now()/1000)]
+      [lastHash, myAddress, nonce, timestamp]
     )
   );
   
   if(BigInt(hash) < BigInt(difficulty)) {
-    // Submit the nonce
-    await contract.mine(nonce);
+    // Submit the nonce along with the timestamp used to find it
+    await contract.mine(nonce, timestamp);
     break;
   }
 }
@@ -103,14 +112,14 @@ for(let nonce = 0; nonce < 1000000; nonce++) {
 
 ### Core Functions
 
-#### `mine(uint256 nonce)`
-Submit a valid nonce to mine tokens. The hash must be below the current difficulty threshold.
+#### `mine(uint256 nonce, uint256 timestamp)`
+The primary function for miners. A `nonce` is submitted along with the `timestamp` that was used as the basis for the PoW calculation. This design prevents race conditions where the difficulty changes mid-search.
 
 #### `adjustDifficulty()`
-Automatically adjusts mining difficulty every 100 blocks based on mining activity.
+This internal function is automatically called every 100 blocks. It recalibrates the `baseDifficulty` to ensure the network maintains the target mining rate.
 
-#### `checkHash(uint256 nonce)`
-View function to verify if a nonce is valid before submitting a transaction.
+#### `getEffectiveDifficulty(uint256 _timestamp)`
+A view function that calculates the difficulty for any given timestamp. It incorporates both the `baseDifficulty` and the time-based bonus.
 
 ### Security Features
 
@@ -145,18 +154,18 @@ Adjust target mines per adjustment interval.
 Successfully tested on:
 - ✅ Monad Testnet (Chain ID: 10143)
 
-## 📈 Difficulty Algorithm
+## 📈 Difficulty Algorithms
 
-The difficulty automatically adjusts every 100 blocks to maintain target mining rate:
+The contract uses a dual-algorithm system for difficulty:
 
-```
-Target: 50 successful mines per 100 blocks
+1.  **Time Bonus (Short-Term Incentive)**: Encourages consistent mining.
+    - For every 30 seconds (`TIME_THRESHOLD`) that pass since the last successful mine, the difficulty becomes 10% easier.
+    - This bonus is capped at 100% (after 300 seconds) to prevent the difficulty from dropping too low.
 
-If actual mines > target → Difficulty increases (harder to mine)
-If actual mines < target → Difficulty decreases (easier to mine)
-
-Max change per adjustment: ±20%
-```
+2.  **Interval Adjustment (Long-Term Health)**: Maintains network stability.
+    - Every 100 blocks (`ADJUSTMENT_INTERVAL`), the contract compares the actual number of mines to the `targetMinesPerInterval` (50).
+    - If `actual mines > target` → `baseDifficulty` increases (mining becomes harder).
+    - If `actual mines < target` → `baseDifficulty` decreases (mining becomes easier).
 
 ## 🔐 Security Considerations
 
